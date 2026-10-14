@@ -1,0 +1,19 @@
+Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Dados brutos e artefatos locais
+data/*.csv
+data/*.zip
+
+# Docker e banco
+postgres_data/
+
+# Sistema operacional e IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
