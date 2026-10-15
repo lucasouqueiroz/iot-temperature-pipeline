@@ -1,13 +1,15 @@
 # Documentação e evidências
 
-Salve neste diretório as capturas de tela do dashboard Streamlit.
+As cinco capturas reais estão publicadas em screenshots/ e incorporadas ao README principal.
 
-Sugestão de nomes:
+- docker.png: projeto ativo no Docker Desktop.
+- dashboard-medias.png: indicadores e média por grupo.
+- dashboard-horas-extremos.png: volume por hora e extremos diários.
+- execucao-pipeline.png: primeira carga e inicialização do Streamlit.
+- testes-e-recarga.png: cinco testes aprovados e segunda carga.
 
-```text
-screenshots/dashboard_media_por_dispositivo.png
-screenshots/dashboard_leituras_por_hora.png
-screenshots/dashboard_max_min_por_dia.png
-```
+[Registro da validação](validacao.md)
 
-Essas imagens serão utilizadas no README e no PDF teórico do trabalho.
+[Checklist e roteiro do vídeo](entrega.md)
+
+Use as capturas também no PDF final, preservando legibilidade. Não publique senhas ou o arquivo .env. O PDF final e o vídeo são as próximas etapas.

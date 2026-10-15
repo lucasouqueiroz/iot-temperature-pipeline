@@ -1,101 +1,148 @@
 # Pipeline de temperaturas IoT
 
-Projeto academico de Disruptive Architectures: IoT, Big Data e IA. Ingestao em lote de leituras historicas, validacao, armazenamento PostgreSQL no Docker e visualizacao Streamlit/Plotly. Nao implementa IA, streaming nem conexao com sensores em tempo real: esses componentes nao sao exigidos no desafio pratico.
+Projeto acadêmico de Disruptive Architectures: IoT, Big Data e IA. Processa leituras históricas em lote com Python, armazena no PostgreSQL 16 via Docker e apresenta três visualizações interativas com Streamlit e Plotly.
 
-## Arquitetura e arquivos
+## Arquitetura e tecnologias
 
-CSV Kaggle → pandas (validacao e deduplicacao) → SQLAlchemy/psycopg2 → PostgreSQL → tres views SQL → Streamlit/Plotly.
+CSV Kaggle → pandas (validação e deduplicação) → SQLAlchemy/psycopg2 → PostgreSQL no Docker → três views SQL → Streamlit/Plotly. Git e GitHub registram a evolução do projeto.
 
-- src/ingest.py: validacao e carga integral transacional.
-- src/dashboard.py: tres visualizacoes, indicadores e exportacao de agregados.
-- sql/views.sql: consultas analiticas.
-- tests/test_ingest.py: testes unitarios sem banco.
-- data/: CSV local, nao versionado.
-- docs/: checklist, roteiro e evidencias a adicionar.
+```text
+src/ingest.py           Validação, carga e criação das views
+src/dashboard.py        Indicadores, gráficos e exportação
+sql/views.sql           Três views analíticas
+tests/test_ingest.py    Cinco testes unitários
+data/                  CSV local, não versionado
+docs/screenshots/       Evidências reais da execução
+docs/validacao.md       Registro dos testes e da integração
+docs/entrega.md         Checklist e roteiro do vídeo
+.env.example            Modelo público sem senha real
+```
 
-## Fonte e semantica
+## Dataset e significado das colunas
 
-Temperature Readings: IoT Devices: https://www.kaggle.com/datasets/atulanandjha/temperature-readings-iot-devices
+Fonte: [Temperature Readings: IoT Devices — atulanandjha](https://www.kaggle.com/datasets/atulanandjha/temperature-readings-iot-devices). Baixe o CSV para data/IOT-temp.csv. O link disponibiliza a fonte sem redistribuir a base; observe os termos do Kaggle antes de republicar os dados.
 
-Baixe o CSV para data/IOT-temp.csv. Respeite os termos da fonte antes de redistribuir a base. Colunas: id, room_id/id, noted_date, temp, out/in. id identifica uma leitura, nao um sensor. device_id e um campo derivado de sala + In/Out por compatibilidade com as views; nao conta dispositivos fisicos. Datas sao interpretadas estritamente como dia-mes-ano hora:minuto, sem inventar fuso horario.
+| CSV original | Banco | Significado |
+|---|---|---|
+| id | source_id | Identificador da leitura |
+| room_id/id | room | Sala/local informado |
+| noted_date | reading_at | Data e hora, interpretadas como dia-mês-ano hora:minuto |
+| temp | temperature | Valor numérico de temperatura |
+| out/in | direction | Classificação In/Out |
+| Derivado | device_id | Sala + classificação, não ID físico de sensor |
 
-## Execucao no Windows / PowerShell
+Os dois grupos não comprovam dois sensores físicos. Não se atribui fuso horário não informado. Trata-se de processamento histórico em lote, sem streaming, modelo de IA ou ligação com sensores em tempo real; esses componentes não são exigidos neste desafio prático.
 
-Use Python 3.11 ou 3.12, Git e Docker Desktop em execucao, com Docker Compose disponivel.
+## Pré-requisitos
+
+Python 3.11 ou 3.12, Git e Docker Desktop com mecanismo Linux ativo. No Windows, configure o WSL 2 caso seja o backend escolhido. Confira docker info: a seção Server precisa responder sem erro.
+
+## Configuração e execução no Windows / PowerShell
 
 ```powershell
 git clone https://github.com/lucasouqueiroz/iot-temperature-pipeline.git
 cd iot-temperature-pipeline
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Se ja clonou, salve suas alteracoes e execute git pull --ff-only em vez de clonar outra vez. Edite .env e defina POSTGRES_PASSWORD; nunca publique esse arquivo. A senha do exemplo e apenas demonstrativa. Coloque o CSV em data/IOT-temp.csv. Os comandos abaixo dispensam ativacao do venv e alteracao da politica do PowerShell.
+Se já clonou, salve suas alterações e use git pull --ff-only em vez de clonar novamente. Abra o arquivo .env na raiz e preencha POSTGRES_PASSWORD com uma senha local antes da primeira criação do banco. Não é a senha do GitHub. Mantenha os demais valores do modelo para a configuração padrão e nunca publique o .env.
+
+Com o CSV em data/IOT-temp.csv e Docker Desktop aberto, execute cada comando após o anterior concluir com sucesso:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe src/ingest.py --validate-only
 docker compose up -d --wait
+docker compose ps
 .\.venv\Scripts\python.exe src/ingest.py
 .\.venv\Scripts\python.exe -m streamlit run src/dashboard.py
 ```
 
-Abra http://localhost:8501. Apos nova carga, clique em Atualizar dados. Linux/macOS: substitua .\.venv\Scripts\python.exe por .venv/bin/python.
+Abra http://localhost:8501. Os comandos usam diretamente o venv e dispensam alteração da política de execução do PowerShell. No Linux/macOS, use .venv/bin/python e copie o modelo com cp .env.example .env, somente se .env não existir.
 
-## Qualidade e seguranca da carga
+## Qualidade, persistência e segurança
 
-A validacao rejeita campos nulos/vazios, datas invalidas, temperaturas nao finitas, classificacoes fora de In/Out e IDs conflitantes. Remove apenas duplicatas exatas. Nao imputa valores nem elimina temperaturas extremas arbitrariamente.
+A ingestão rejeita colunas ausentes, campos nulos/vazios, datas inválidas, temperaturas não finitas, classificações fora de In/Out e IDs conflitantes. Remove apenas duplicatas exatas, sem imputação ou exclusão arbitrária de extremos.
 
-ATENCAO: a carga substitui integralmente temperature_readings neste banco dedicado. DELETE, insercao, criacao das views e verificacao de contagens ocorrem na mesma transacao; falhas revertem a operacao. Reexecutar nao acumula leituras. Nao aponte este projeto para tabelas de producao. source_id tem indice unico; reading_at tem indice para consultas futuras. Um bloqueio transacional serializa cargas simultaneas.
+ATENÇÃO: a carga substitui integralmente temperature_readings no banco dedicado ao projeto. DELETE, inserção, criação das views e conferência de contagens ocorrem na mesma transação. Não aponte para um banco de produção. source_id tem índice único; reading_at tem índice para consultas; um bloqueio transacional serializa cargas. Falhas dentro da transação revertem as alterações pelo mecanismo transacional. Não foi realizado teste de injeção de falha para demonstrar rollback experimentalmente.
 
-## Views e interpretacao
+O volume Docker mantém os dados ao parar o serviço. A porta PostgreSQL é publicada somente na interface local. Credenciais ficam no .env ignorado pelo Git.
 
-1. avg_temp_por_dispositivo: media e quantidade por grupo sala/classificacao. Identifica diferencas entre grupos, nao necessariamente sensores.
-2. leituras_por_hora: soma por hora do dia em todo o periodo. Mede volume de coleta, nao taxa de falhas nem temperatura media por hora.
-3. temp_max_min_por_dia: extremos diarios combinando grupos. Mostra variacao observada; isoladamente nao comprova defeito ou causa ambiental.
+## Views SQL e visualizações
 
-As contagens das duas primeiras views devem coincidir com a tabela. Nao compare uma media simples das medias de grupos com a media geral: tamanhos dos grupos diferem.
+O SQL completo está em [sql/views.sql](sql/views.sql).
 
-## Resultados do CSV fornecido
+1. avg_temp_por_dispositivo: GROUP BY device_id, AVG(temperature) arredondada a duas casas e COUNT(*). Compara média e quantidade por grupo sala/classificação. O nome técnico não deve ser interpretado como identificação física de sensores.
+2. leituras_por_hora: EXTRACT(HOUR FROM reading_at) e COUNT(*), agregando todo o período por hora do dia, de 0 a 23. Mede volume de coleta, não temperatura nem taxa de falhas.
+3. temp_max_min_por_dia: DATE(reading_at), MAX e MIN, fornecendo extremos diários combinando os grupos. A linha conecta dias observados e não comprova coleta contínua entre eles.
 
-Analise direta do arquivo anexado durante o desenvolvimento (ainda nao e evidencia de execucao no PostgreSQL local): 97.606 linhas originais; uma duplicata exata; 97.605 leituras unicas; periodo de 28/07/2018 07:06 a 08/12/2018 09:30.
+A ingestão confere o total da tabela e as somas das duas primeiras views antes de confirmar a transação. Não calcule a média geral como média simples das médias de grupos de tamanhos diferentes.
 
-Apos deduplicacao: In tem 20.345 leituras, media aproximada 30,45 e faixa 21–41; Out tem 77.260 leituras, media aproximada 36,27 e faixa 24–51. A diferenca observada das medias e aproximadamente 5,81. Nao e uma comparacao pareada por instante: horarios e volumes de amostragem podem diferir.
+## Resultados e insights
 
-Uso pratico: explorar diferencas entre classificacoes, horarios de coleta e extremos para apoiar investigacoes. Limites de alerta devem ser definidos pelo contexto real; o projeto nao afirma anomalias somente com base nesses numeros.
+Execução local de 14/10/2026, comprovada por logs e capturas fornecidos pelo aluno:
 
-## Validacao local e evidencias
+- Registros originais: 97.606; duplicata exata removida: uma; leituras únicas: 97.605.
+- Período: 28/07/2018 07:06 a 08/12/2018 09:30.
+- Dashboard: dois grupos e 86 dias com registros, não necessariamente consecutivos.
 
-Execute a ingestao duas vezes; ambas devem informar 97.605 leituras para este CSV. O script verifica automaticamente a tabela e as somas das views antes de confirmar a transacao. Para conferir manualmente:
+| Classificação | Leituras | Média aproximada | Mínimo | Máximo |
+|---|---:|---:|---:|---:|
+| In | 20.345 | 30,45392 | 21 | 41 |
+| Out | 77.260 | 36,26517 | 24 | 51 |
 
-```powershell
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT COUNT(*) FROM temperature_readings;"'
-```
+A diferença entre médias é aproximadamente 5,81. A comparação é descritiva, não pareada por instante: horários e volumes podem diferir. Não comprova causalidade. Os extremos e as diferenças entre grupos podem orientar investigações e alertas, cujos limites dependem do contexto operacional. Menor volume por hora, isoladamente, não prova falha de coleta.
 
-Salve prints reais em docs/screenshots/: visao geral, medias, horas e extremos diarios. Adicione as imagens ao README somente apos gera-las. Nao ha screenshots nem PDF final incluidos nesta etapa. Consulte docs/entrega.md.
+## Validação e evidências
 
-## Diagnostico
+PostgreSQL 16 saudável; carga confirmada; contagens verificadas pelo script; cinco testes unitários aprovados; segunda carga manteve 97.605 leituras; indicadores e três gráficos renderizados. O registro detalhado está em [docs/validacao.md](docs/validacao.md). Não foram executados testes de carga, concorrência ou injeção de falhas.
 
-- Arquivo ausente: confirme data/IOT-temp.csv e CSV_PATH.
-- Banco indisponivel: docker compose ps e docker compose logs postgres.
-- Porta ocupada: altere POSTGRES_PORT no .env e recrie o servico com docker compose up -d --wait.
-- Senha alterada com volume existente: a variavel de inicializacao nao muda automaticamente a senha ja gravada no banco; use a senha original ou altere-a via SQL. Nao apague volumes sem aceitar perder os dados.
-- Parar sem apagar dados: docker compose down.
-- Dependencias: confirme o interpretador do venv e execute pip check com esse interpretador.
+### Docker Desktop
+
+![Projeto ativo no Docker Desktop](docs/screenshots/docker.png)
+
+### Indicadores e médias por grupo
+
+![Indicadores e gráfico de médias](docs/screenshots/dashboard-medias.png)
+
+### Volume por hora e extremos diários
+
+![Gráficos por hora e por dia](docs/screenshots/dashboard-horas-extremos.png)
+
+### Carga e inicialização do dashboard
+
+![Terminal com carga confirmada](docs/screenshots/execucao-pipeline.png)
+
+### Testes unitários e recarga
+
+![Cinco testes aprovados e recarga sem acúmulo de registros](docs/screenshots/testes-e-recarga.png)
+
+## Diagnóstico e operação
+
+- docker não reconhecido: instale Docker Desktop ou reabra o terminal após a instalação.
+- Cliente responde e Server falha: inicie Docker Desktop e resolva mensagens do backend WSL antes do Compose.
+- POSTGRES_PASSWORD ausente: salve .env na raiz e reinicie o Streamlit.
+- Senha alterada com volume existente: editar .env não altera a senha já gravada no banco; use a original ou altere-a via SQL. Não apague volumes sem aceitar a perda de dados.
+- Banco indisponível: docker compose ps e docker compose logs postgres.
+- Porta ocupada: ajuste POSTGRES_PORT no .env e recrie o serviço.
+- Parar preservando o volume: docker compose down.
+- Após recarga: clique em Atualizar dados no dashboard.
 
 ## Git e autoria
 
 ```powershell
 git status
-git add src docs README.md
-git commit -m "Valida pipeline local e adiciona evidencias"
+git add README.md docs
+git diff --cached --stat
+git commit -m "Adiciona evidencias da validacao local"
 git push origin main
 git pull --ff-only
 ```
 
-O repositorio foi inicialmente criado remotamente; git init e usado para iniciar um repositorio novo e nao deve ser executado novamente para este clone. Documente somente comandos realmente utilizados. Verifique user.name e user.email antes de seus commits. Nao use git add -f para incluir .env ou CSV.
+O repositório foi criado remotamente e clonado. git init inicia um repositório novo e não precisa ser executado novamente neste clone. Verifique user.name e user.email antes dos commits. Não force a inclusão de .env, .venv ou CSV. Documente somente comandos e resultados efetivamente realizados.
 
-## Estado de validacao
+## Entrega acadêmica
 
-Tratamento do CSV verificado durante o desenvolvimento. Testes unitarios incluidos para execucao local. Integracao PostgreSQL/Docker e renderizacao do dashboard precisam ser comprovadas no ambiente do aluno; nao sao declaradas aprovadas antecipadamente.
+Código e evidências estão publicados. O PDF final e o vídeo de até quatro minutos ainda precisam ser concluídos. Consulte [docs/entrega.md](docs/entrega.md). Os links finais devem ser conferidos antes do envio; este repositório não garante uma nota específica.
