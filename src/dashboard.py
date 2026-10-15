@@ -1,90 +1,53 @@
-"""Dashboard Streamlit para leituras de temperatura IoT."""
-
-import os
-from pathlib import Path
-
+"""Dashboard das views PostgreSQL; os grupos nao representam sensores fisicos."""
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from dotenv import load_dotenv
-from sqlalchemy import create_engine
+from sqlalchemy import text
+from ingest import get_engine
 
-BASE_DIR = Path(__file__).resolve().parents[1]
-load_dotenv(BASE_DIR / ".env")
+st.set_page_config(page_title='Temperaturas IoT', layout='wide')
+st.title('Monitoramento de temperaturas IoT')
+st.caption('CSV Kaggle → Python → PostgreSQL no Docker → views SQL → Streamlit')
+st.info('Sala + In/Out define um grupo de leitura, nao um sensor fisico identificado. Analise historica em lote, nao monitoramento em tempo real.')
 
-DB_USER = os.getenv("POSTGRES_USER", "iot_user")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "iot_password")
-DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
-DB_PORT = os.getenv("POSTGRES_PORT", "5432")
-DB_NAME = os.getenv("POSTGRES_DB", "iot_db")
+@st.cache_resource
+def database():
+    return get_engine()
 
-DATABASE_URL = (
-    f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-)
+@st.cache_data(ttl=60)
+def load_view(name):
+    allowed = {'avg_temp_por_dispositivo', 'leituras_por_hora', 'temp_max_min_por_dia'}
+    if name not in allowed:
+        raise ValueError('View nao permitida')
+    with database().connect() as connection:
+        return pd.read_sql_query(text(f'SELECT * FROM {name}'), connection)
 
-
-@st.cache_data(ttl=300)
-def load_data(view_name: str) -> pd.DataFrame:
-    """Carrega dados de uma view do PostgreSQL."""
-    engine = create_engine(DATABASE_URL)
-    return pd.read_sql(f"SELECT * FROM {view_name}", engine)
-
-
-st.set_page_config(page_title="Dashboard de Temperaturas IoT", layout="wide")
-st.title("Dashboard de Temperaturas IoT")
-st.caption("Pipeline com Python, PostgreSQL, Docker e Streamlit")
+if st.sidebar.button('Atualizar dados'):
+    st.cache_data.clear()
 
 try:
-    df_avg = load_data("avg_temp_por_dispositivo")
-    df_hour = load_data("leituras_por_hora")
-    df_daily = load_data("temp_max_min_por_dia")
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Dispositivos", int(df_avg["device_id"].nunique()))
-    col2.metric("Total de leituras", int(df_avg["total_leituras"].sum()))
-    col3.metric("Dias analisados", int(df_daily["data"].nunique()))
-
-    st.header("Média de temperatura por dispositivo")
-    fig_avg = px.bar(
-        df_avg.sort_values("avg_temp", ascending=False),
-        x="device_id",
-        y="avg_temp",
-        color="avg_temp",
-        labels={"device_id": "Dispositivo", "avg_temp": "Temperatura média"},
-    )
-    st.plotly_chart(fig_avg, use_container_width=True)
-
-    st.header("Leituras por hora do dia")
-    fig_hour = px.line(
-        df_hour,
-        x="hora",
-        y="contagem",
-        markers=True,
-        labels={"hora": "Hora", "contagem": "Leituras"},
-    )
-    st.plotly_chart(fig_hour, use_container_width=True)
-
-    st.header("Temperaturas máxima e mínima por dia")
-    fig_daily = px.line(
-        df_daily,
-        x="data",
-        y=["temp_max", "temp_min"],
-        labels={"data": "Data", "value": "Temperatura", "variable": "Métrica"},
-    )
-    st.plotly_chart(fig_daily, use_container_width=True)
-
-    with st.expander("Ver dados agregados"):
-        st.subheader("Média por dispositivo")
-        st.dataframe(df_avg)
-        st.subheader("Leituras por hora")
-        st.dataframe(df_hour)
-        st.subheader("Máximas e mínimas por dia")
-        st.dataframe(df_daily)
-
-except Exception as error:
-    st.error("Não foi possível carregar os dados do PostgreSQL.")
-    st.exception(error)
-    st.info(
-        "Verifique se o Docker está ativo, execute `docker compose up -d` "
-        "e rode `python src/ingest.py` antes de abrir o dashboard."
-    )
+    avg = load_view('avg_temp_por_dispositivo')
+    hour = load_view('leituras_por_hora').sort_values('hora')
+    daily = load_view('temp_max_min_por_dia').sort_values('data')
+    if avg.empty or daily.empty:
+        st.warning('Banco sem leituras. Execute python src/ingest.py.')
+        st.stop()
+    a, b, c = st.columns(3)
+    a.metric('Grupos de leitura', len(avg))
+    b.metric('Leituras unicas', f"{int(avg.total_leituras.sum()):,}")
+    c.metric('Dias com leituras', len(daily))
+    st.header('Media de temperatura por sala e classificacao')
+    st.plotly_chart(px.bar(avg, x='device_id', y='avg_temp', color='device_id', labels={'device_id': 'Grupo de leitura', 'avg_temp': 'Temperatura media'}), use_container_width=True)
+    st.header('Volume de leituras por hora do dia')
+    st.caption('Agregacao por hora (0–23) de todo o periodo; nao e uma serie cronologica continua.')
+    st.plotly_chart(px.line(hour, x='hora', y='contagem', markers=True, labels={'hora': 'Hora do dia', 'contagem': 'Leituras'}), use_container_width=True)
+    st.header('Temperaturas maxima e minima por dia')
+    st.plotly_chart(px.line(daily, x='data', y=['temp_max', 'temp_min'], labels={'data': 'Data', 'value': 'Temperatura', 'variable': 'Metrica'}), use_container_width=True)
+    with st.expander('Dados agregados e exportacao'):
+        for name, frame in [('medias', avg), ('horas', hour), ('dias', daily)]:
+            st.dataframe(frame, use_container_width=True)
+            st.download_button(f'Baixar {name}', frame.to_csv(index=False).encode('utf-8'), file_name=f'{name}.csv', mime='text/csv')
+except Exception:
+    st.error('Nao foi possivel consultar as views. Confira .env, saude do container e execute a ingestao. Consulte o terminal para detalhes locais.')
+    import logging
+    logging.exception('Falha ao consultar PostgreSQL')
